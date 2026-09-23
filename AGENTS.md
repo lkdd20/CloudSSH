@@ -218,6 +218,7 @@ Required for optional features (configured in `wrangler.toml` or Cloudflare Dash
 - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` - GitHub OAuth
 - `GITHUB_ALLOWED_USER_IDS` - Optional comma-separated numeric GitHub user ID allowlist; omitted means unrestricted GitHub login
 - `REQUIRE_GITHUB_AUTH` - Optional; `true` disables anonymous SSH and requires a valid GitHub session
+- This deployment sets `REQUIRE_GITHUB_AUTH=true` and limits GitHub login to user ID `188610988` in `wrangler.toml`; configure OAuth secrets and `BASE_URL` before using it.
 - `ENABLE_SSH_SHARING` - Optional; `true` enables one-time audited SSH sharing for signed-in owners (disabled by default)
 - `TURNSTILE_SECRET` / `TURNSTILE_SITEKEY` - Bot verification
 - `BASE_URL` - OAuth callback URL
