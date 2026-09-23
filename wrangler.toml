@@ -5,6 +5,9 @@ workers_dev = true
 
 [vars]
 DEBUG_MODE = "false"
+# Private deployment: keep anonymous SSH disabled, including during initial deploy.
+REQUIRE_GITHUB_AUTH = "true"
+GITHUB_ALLOWED_USER_IDS = "188610988"
 
 # 构建监视路径：仅源代码变动时触发重新构建
 [build]
