@@ -1399,6 +1399,37 @@ select optgroup {
   filter: brightness(1.12);
 }
 
+/* ==================== 单管理员密码登录（复用 auth-challenge-dialog 样式体系） ==================== */
+
+/*
+ * 生成器结果串：等宽小字号，窄屏可横向滚动；完整值以复制按钮为准。
+ * 必须带 !important + ID 选择器压过全局移动端输入规则
+ * input:not(...){font-size:16px!important}（≤767px / 触屏 iPad≤1180px，
+ * 同为 !important 时按特异性决胜：ID (1,0,0) > :not 链 (0,3,1)）。
+ * 密码等交互输入仍按全局规则吃 16px 防 iOS 聚焦缩放，只读展示串豁免。
+ */
+#admin-hash-result {
+  font-family: var(--font-code);
+  font-size: 11px !important;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+/* 生成后分步指引：保留换行 */
+.admin-hash-gen-steps {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--text-muted);
+  white-space: pre-line;
+}
+
+/* 认证页页脚入口：窄屏独占整行，避免与状态文本/登录按钮挤在一行 */
+#admin-hash-gen-entry {
+  flex-shrink: 0;
+}
+
+
 @keyframes app-dialog-in {
   from {
     opacity: 0;
@@ -1454,6 +1485,20 @@ select optgroup {
   }
   .auth-challenge-dialog__button {
     width: 100%;
+    /* 加大触摸目标（对齐 remote-editor 移动端先例） */
+    min-height: 44px;
+  }
+  /* 注：对话框输入的 iOS 防缩放（16px）由全局规则 input:not(...) 在 ≤767px 统一处理，
+     此处无需重复声明；仅对只读结果串降字号（ID 选择器胜过全局规则） */
+  #admin-hash-result {
+    /* 只读展示串豁免防缩放字号：窄屏进一步降字号换可视宽度 */
+    font-size: 10px !important;
+  }
+  #admin-hash-gen-entry {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    text-align: left;
+    padding-left: 2px;
   }
 }
 
@@ -2852,6 +2897,80 @@ html[data-ui-motion="none"] :is(.flicker, .scanlines, .scanline) {
   display: block;
 }
 
+/* Agent Mode Segmented Control (Interactive vs Auto Mode) */
+.agent-mode-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--on-surface) 6%, transparent);
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.agent-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  height: 22px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.agent-mode-btn:hover:not(.is-active) {
+  color: var(--on-surface);
+  background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+}
+
+.agent-mode-btn.is-active {
+  background: var(--bg-elevated);
+  color: var(--on-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.agent-mode-segmented[data-active-mode="auto"] .agent-mode-btn[data-mode="auto"].is-active {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 16%, var(--bg-elevated));
+}
+
+.agent-mode-segmented[data-active-mode="auto"] .agent-mode-btn[data-mode="auto"].is-active .material-symbols-outlined {
+  color: var(--warning);
+  font-variation-settings: 'FILL' 1;
+}
+
+.agent-mode-btn .material-symbols-outlined {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Agent confirmation auto countdown */
+.agent-confirm-progress-track {
+  width: 100%;
+  height: 3px;
+  background: color-mix(in srgb, var(--error) 20%, transparent);
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.agent-confirm-progress-bar {
+  height: 100%;
+  background: var(--warning);
+  border-radius: 9999px;
+  width: 100%;
+  transition: width 3s linear;
+}
+
 /* ========== Agent Markdown Content (themed) ==========
    Style the DOM output from marked.js. All colors come from CSS variables so
    theme switching only touches :root variables — the markup is untouched. */
@@ -3258,6 +3377,54 @@ html[data-ui-motion="none"] :is(.flicker, .scanlines, .scanline) {
   background: color-mix(in srgb, var(--on-surface) 12%, transparent);
 }
 
+/* Agent response message actions bar */
+.agent-response-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.agent-response:hover .agent-response-actions,
+.agent-response:focus-within .agent-response-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (pointer: coarse) {
+  .agent-response-actions {
+    opacity: 0.75;
+    pointer-events: auto;
+  }
+}
+
+.agent-response-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.agent-response-action-btn:hover {
+  color: var(--on-surface);
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+}
+
+.agent-response-action-btn.is-success {
+  color: var(--accent);
+}
+
 .agent-aborted-badge {
   display: inline-flex;
   align-items: center;
@@ -3529,7 +3696,8 @@ html[data-ui-motion="none"] :is(.flicker, .scanlines, .scanline) {
   font-size: 11px;
 }
 
-.tp-live-preview:empty {
+.tp-live-preview:empty,
+.agent-thinking-process.tp-done .tp-live-preview {
   display: none;
   border: none;
   padding: 0;

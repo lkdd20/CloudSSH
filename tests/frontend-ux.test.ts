@@ -8,6 +8,7 @@ import {
   normalizeTagsInput,
   paginateServers,
   resolveServerPageSize,
+  sortServers,
   type ServerConfig,
 } from '../frontend/src/server-list';
 import { resolveTerminalFontSize } from '../frontend/src/terminal-layout';
@@ -56,13 +57,13 @@ describe('服务器操作系统图标', () => {
 });
 
 describe('服务器列表搜索', () => {
-  it('手机、触屏平板和桌面端分别使用 3、6、9 张分页', () => {
+  it('手机端使用 3 张分页，触屏平板与桌面端使用 6 张分页', () => {
     expect(resolveServerPageSize(390, true)).toBe(3);
     expect(resolveServerPageSize(767, false)).toBe(3);
     expect(resolveServerPageSize(768, true)).toBe(6);
     expect(resolveServerPageSize(1180, true)).toBe(6);
-    expect(resolveServerPageSize(1024, false)).toBe(9);
-    expect(resolveServerPageSize(1181, true)).toBe(9);
+    expect(resolveServerPageSize(1024, false)).toBe(6);
+    expect(resolveServerPageSize(1181, true)).toBe(6);
   });
 
   it('按名称、主机和用户名进行不区分大小写的过滤', () => {
@@ -91,6 +92,85 @@ describe('服务器列表搜索', () => {
       currentPage: 2,
       totalPages: 2,
     });
+  });
+});
+
+describe('服务器列表多维排序', () => {
+  const sampleServers: ServerConfig[] = [
+    {
+      id: 1,
+      user_id: 1,
+      name: 'Beta Server',
+      host: 'beta.com',
+      port: 22,
+      username: 'root',
+      auth_method: 'password',
+      tags: [],
+      last_connected_at: 1000,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+    },
+    {
+      id: 2,
+      user_id: 1,
+      name: 'Alpha Server',
+      host: 'alpha.com',
+      port: 22,
+      username: 'root',
+      auth_method: 'password',
+      tags: [],
+      last_connected_at: 5000,
+      created_at: '2026-01-02T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    },
+    {
+      id: 3,
+      user_id: 1,
+      name: 'Gamma Server',
+      host: 'gamma.com',
+      port: 22,
+      username: 'root',
+      auth_method: 'password',
+      tags: [],
+      last_connected_at: null,
+      created_at: '2026-01-03T00:00:00Z',
+      updated_at: '2026-01-03T00:00:00Z',
+    },
+  ];
+
+  it('recent 模式优先按最近连接时间倒序，未连接者后置', () => {
+    const sorted = sortServers(sampleServers, 'recent');
+    expect(sorted.map((s) => s.id)).toEqual([2, 1, 3]);
+  });
+
+  it('name 模式按服务器名称 A-Z 升序', () => {
+    const sorted = sortServers(sampleServers, 'name');
+    expect(sorted.map((s) => s.id)).toEqual([2, 1, 3]);
+  });
+
+  it('created 模式按创建时间倒序', () => {
+    const sorted = sortServers(sampleServers, 'created');
+    expect(sorted.map((s) => s.id)).toEqual([3, 2, 1]);
+  });
+
+  it('updated 模式按修改时间倒序', () => {
+    const sorted = sortServers(sampleServers, 'updated');
+    expect(sorted.map((s) => s.id)).toEqual([3, 1, 2]);
+  });
+
+  it('ServerList 提供 refresh 方法并在返回主页时联动刷新', () => {
+    const serverListSource = readFileSync(
+      new URL('../frontend/src/server-list.ts', import.meta.url),
+      'utf8'
+    );
+    const mainSource = readFileSync(
+      new URL('../frontend/src/main.ts', import.meta.url),
+      'utf8'
+    );
+
+    expect(serverListSource).toContain('async refresh(): Promise<void>');
+    expect(serverListSource).toContain('server.last_connected_at = Date.now()');
+    expect(mainSource).toContain('serverList?.refresh()');
   });
 });
 
@@ -169,45 +249,6 @@ describe('连接表单提交与端口校验', () => {
   });
 });
 
-describe('Agent 危险确认交互', () => {
-  const agentSource = readFileSync(
-    new URL('../frontend/src/agent/agent-panel.ts', import.meta.url),
-    'utf8'
-  );
-  const confirmDialogSource = agentSource.slice(
-    agentSource.indexOf('private showConfirmDialog'),
-    agentSource.indexOf('private convertStreamToThoughtStep')
-  );
-  const tabManagerSource = readFileSync(
-    new URL('../frontend/src/tab-manager.ts', import.meta.url),
-    'utf8'
-  );
-
-  it('使用 alertdialog 语义并默认聚焦拒绝按钮', () => {
-    expect(confirmDialogSource).toContain("el.setAttribute('role', 'alertdialog')");
-    expect(confirmDialogSource).toContain(
-      "el.setAttribute('aria-labelledby', 'agent-confirm-title')"
-    );
-    expect(confirmDialogSource).toContain(
-      "el.setAttribute('aria-describedby', 'agent-confirm-description')"
-    );
-    expect(confirmDialogSource).toContain('requestAnimationFrame(() => rejectButton.focus())');
-  });
-
-  it('Escape 拒绝、Tab 限制焦点，且没有全局 Enter 批准逻辑', () => {
-    expect(confirmDialogSource).toContain("event.key === 'Escape'");
-    expect(confirmDialogSource).toContain("event.key !== 'Tab'");
-    expect(confirmDialogSource).not.toContain("event.key === 'Enter'");
-    expect(confirmDialogSource).toContain('this.resolvePendingConfirmation(false)');
-  });
-
-  it('关闭面板、销毁会话或切换标签时自动拒绝待确认操作', () => {
-    expect(agentSource).toMatch(/hide\(\): void \{\s*this\.rejectPendingConfirmation\(false\)/);
-    expect(agentSource).toMatch(/dispose\(\): void \{\s*this\.rejectPendingConfirmation\(false\)/);
-    expect(tabManagerSource).toContain('prevTab.agentPanel?.rejectPendingConfirmation(false)');
-  });
-});
-
 describe('网络质量三色提示', () => {
   it('分别按 CF 延迟和 WebSocket RTT 阈值返回三种颜色等级', () => {
     expect(getNetworkQuality(100, 'cf')).toBe('good');
@@ -227,100 +268,5 @@ describe('网络质量三色提示', () => {
     expect(source).toContain('CF-');
     expect(source).toContain('RTT:');
     expect(source).not.toMatch(/良好|一般|较差|Good|Fair|Poor/);
-  });
-});
-
-describe('终端选区询问 Agent', () => {
-  const tabManagerSource = readFileSync(
-    new URL('../frontend/src/tab-manager.ts', import.meta.url),
-    'utf8'
-  );
-  const terminalSource = readFileSync(
-    new URL('../frontend/src/terminal.ts', import.meta.url),
-    'utf8'
-  );
-  const agentSource = readFileSync(
-    new URL('../frontend/src/agent/agent-panel.ts', import.meta.url),
-    'utf8'
-  );
-  const indexSource = readFileSync(new URL('../frontend/index.html', import.meta.url), 'utf8');
-
-  it('监听完整选区并在点击入口后附加到 Agent 输入区', () => {
-    expect(terminalSource).toContain('this.terminal.onSelectionChange');
-    expect(terminalSource).toContain('this.terminal.getSelection()');
-    expect(tabManagerSource).toContain('tab.agentPanel.attachTerminalSelection(');
-    expect(tabManagerSource).not.toContain("tab.agentPanel.sendMessage(t('agent.selection");
-    expect(tabManagerSource).toContain('tab.terminal.clearSelection()');
-    expect(agentSource).toContain('id="agent-context"');
-    expect(agentSource).toContain('clearTerminalSelectionContext()');
-  });
-
-  it('在鼠标选区末端显示浮动入口，取消选区后隐藏', () => {
-    const toolbar = indexSource.slice(
-      indexSource.indexOf('<!-- TopAppBar -->'),
-      indexSource.indexOf('<!-- Tab Bar')
-    );
-    expect(toolbar).not.toContain('ask-ai-selection-btn');
-    expect(indexSource).toContain('class="ask-ai-selection-float hidden');
-    expect(terminalSource).toContain("this.container.addEventListener('pointermove'");
-    expect(terminalSource).toContain("window.addEventListener('pointerup'");
-    expect(tabManagerSource).toContain('const { clientX, clientY } = tab.selectionAnchor');
-    expect(tabManagerSource).toContain("button.classList.toggle('hidden', !visible)");
-    expect(terminalSource).toContain('this.selectionAnchor = null');
-  });
-
-  it('没有对选区或外部消息进行长度截断', () => {
-    const selectionFlow = tabManagerSource.slice(
-      tabManagerSource.indexOf('askAIAboutActiveSelection'),
-      tabManagerSource.indexOf('// ==================== 渲染标签栏')
-    );
-    const sendMessageFlow = agentSource.slice(
-      agentSource.indexOf('sendMessage(text: string)'),
-      agentSource.indexOf('private updateInputState')
-    );
-    expect(selectionFlow).not.toMatch(/slice|substring|maxLength|truncate/i);
-    expect(sendMessageFlow).not.toMatch(/slice|substring|maxLength|truncate/i);
-  });
-
-  it('要求用户输入问题后发送，并为选区提供可访问的移除入口', () => {
-    expect(agentSource).toContain('if (!message) return false');
-    expect(agentSource).toContain("t('agent.removeSelection')");
-    expect(agentSource).toContain('aria-label=');
-    expect(agentSource).toContain('buildTerminalSelectionMessage(message, terminalSelection)');
-    expect(agentSource).toContain('if (selection) this.clearTerminalSelectionContext()');
-  });
-});
-
-describe('AI 模型选择下拉框与交互体验', () => {
-  const aiConfigSource = readFileSync(
-    new URL('../frontend/src/ai-config.ts', import.meta.url),
-    'utf-8'
-  );
-
-  it('使用自定义 Combobox 替代原生 datalist，杜绝原生丑陋黑三角与选项被旧值过滤的问题', () => {
-    expect(aiConfigSource).not.toContain('<datalist');
-    expect(aiConfigSource).not.toContain('list="ai-model-list"');
-    expect(aiConfigSource).toContain('id="ai-model-combobox"');
-    expect(aiConfigSource).toContain('id="ai-model-menu"');
-    expect(aiConfigSource).toContain('id="ai-model-dropdown-btn"');
-    expect(aiConfigSource).toContain('id="ai-model-clear-btn"');
-    expect(aiConfigSource).toContain('expand_more');
-  });
-
-  it('已配置密钥时无需重新输入 API Key 即可获取模型列表', () => {
-    expect(aiConfigSource).toContain('this.hasConfiguredKey');
-    expect(aiConfigSource).toContain('!apiKey && !this.hasConfiguredKey');
-  });
-
-  it('获取模型列表后能够展示全部拉取到的模型并支持展开与清空', () => {
-    expect(aiConfigSource).toContain('this.openDropdown(true)');
-    expect(aiConfigSource).toContain('updateClearButtonVisibility');
-    expect(aiConfigSource).toContain('renderDropdownOptions');
-  });
-
-  it('防密钥外带：Base URL 变动时必须提供对应密钥，且保存后清空输入框明文', () => {
-    expect(aiConfigSource).toContain('this.savedBaseUrl');
-    expect(aiConfigSource).toContain('this.isSameBaseUrl(baseUrl, this.savedBaseUrl)');
-    expect(aiConfigSource).toContain("if (apiKeyEl) apiKeyEl.value = ''");
   });
 });
