@@ -2,9 +2,11 @@ name: Sync upstream
 
 on:
   schedule:
-    # Runs daily at 04:20 Asia/Shanghai (20:20 UTC).
-    - cron: '20 20 * * *'
+    - cron: '17 0 * * *'
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/sync-upstream.yml']
 
 permissions:
   contents: write
@@ -15,81 +17,52 @@ concurrency:
 
 jobs:
   sync:
-    # Run only in forks. Scheduled sync is opt-in;
-    # manual dispatch remains available without setting the repository variable.
-    if: >-
-      github.event.repository.fork == true &&
-      (github.event_name == 'workflow_dispatch' || vars.AUTO_SYNC_UPSTREAM == 'true')
+    if: github.repository == 'lkdd20/CloudSSH'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-
+    timeout-minutes: 10
     steps:
-      - name: Sync main branch from upstream
+      - name: Merge upstream and preserve fork changes
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
+          UPSTREAM_REPOSITORY: newbietan/CloudSSH
+          DEFAULT_BRANCH: main
+          UPSTREAM_BRANCH: main
+          GIT_TERMINAL_PROMPT: '0'
+        shell: bash
         run: |
           set -euo pipefail
-
-          error_file="$(mktemp)"
-          trap 'rm -f "$error_file"' EXIT
-
-          if ! response=$(gh api \
-            --method POST \
-            "repos/${REPOSITORY}/merge-upstream" \
-            -f branch=main 2>"$error_file"); then
-            cat "$error_file" >&2
-            echo "::error title=上游同步失败::GitHub 无法同步 main 分支，请检查分支冲突或仓库权限。"
-            {
-              echo "## 上游同步结果"
-              echo
-              echo "- 状态：同步失败"
-              echo "- 建议：检查分支冲突或仓库权限"
-            } >> "$GITHUB_STEP_SUMMARY"
+          gh auth setup-git --hostname github.com
+          workdir="$(mktemp -d "$RUNNER_TEMP/fork-sync.XXXXXX")"
+          git clone --no-tags --single-branch --branch "$DEFAULT_BRANCH" "https://github.com/$REPOSITORY.git" "$workdir"
+          cd "$workdir"
+          git remote add upstream "https://github.com/$UPSTREAM_REPOSITORY.git"
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+            echo 'Default branch already contains upstream.'
+            exit 0
+          fi
+          set +e
+          git -c core.hooksPath=/dev/null merge --no-commit --no-ff FETCH_HEAD
+          merge_status=$?
+          set -e
+          if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            echo "Unable to start upstream merge (status $merge_status)." >&2
             exit 1
           fi
-
-          if [[ -s "$error_file" ]]; then
-            cat "$error_file" >&2
+          # Keep fork workflows because GITHUB_TOKEN cannot update workflow files.
+          git rm -r -f --ignore-unmatch .github/workflows >/dev/null
+          git restore --source=HEAD --staged --worktree -- .github/workflows
+          # Inspect unresolved conflicts before staging, which would mark them resolved.
+          unresolved="$(git diff --name-only --diff-filter=U)"
+          if [[ -n "$unresolved" ]]; then
+            printf 'Upstream conflicts require review:\n%s\n' "$unresolved" >&2
+            git merge --abort
+            exit 1
           fi
-          rm -f "$error_file"
-          trap - EXIT
-
-          merge_type=$(jq -r '.merge_type // "unknown"' <<< "$response")
-          base_branch=$(jq -r '.base_branch // "unknown"' <<< "$response")
-          detail=""
-
-          case "$merge_type" in
-            none)
-              result="当前 main 分支未落后于上游，无需同步"
-              ;;
-            fast-forward)
-              result="已成功同步上游更新"
-              detail="合并方式：fast-forward"
-              ;;
-            merge)
-              result="已成功同步上游更新"
-              detail="合并方式：merge"
-              ;;
-            *)
-              result="GitHub 已完成同步请求"
-              detail="合并方式：${merge_type}"
-              ;;
-          esac
-
-          echo "上游分支：${base_branch}"
-          echo "同步结果：${result}"
-          if [[ -n "$detail" ]]; then
-            echo "$detail"
-          fi
-          echo "::notice title=上游同步::${result}"
-
-          {
-            echo "## 上游同步结果"
-            echo
-            echo "- 上游分支：\`${base_branch}\`"
-            echo "- 状态：${result}"
-            if [[ -n "$detail" ]]; then
-              echo "- ${detail}"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          git add -A
+          git -c core.hooksPath=/dev/null commit -m 'chore: sync upstream (preserve fork workflows)'
+          git push origin "HEAD:$DEFAULT_BRANCH"
