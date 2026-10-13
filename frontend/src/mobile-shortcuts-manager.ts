@@ -9,7 +9,7 @@ import {
   SHORTCUT_LABEL_MAX_LENGTH,
   SHORTCUT_VALUE_MAX_LENGTH,
 } from '../../src/mobile-shortcuts-schema';
-import { t, translateDocument, type TranslationKey } from './i18n';
+import { type TranslationKey, t, translateDocument } from './i18n';
 import { notify } from './ui-feedback';
 
 const LOCAL_CACHE_KEY = 'cloudssh_mobile_shortcuts_v1';
@@ -233,7 +233,7 @@ export class MobileShortcutsManager {
     customLabelInput.id = 'mobile-shortcut-custom-label';
     customLabelInput.type = 'text';
     customLabelInput.maxLength = SHORTCUT_LABEL_MAX_LENGTH;
-    customLabelInput.className = 'terminal-input w-24 text-xs font-mono';
+    customLabelInput.className = 'terminal-input !w-24 shrink-0 text-[11px] font-mono';
     customLabelInput.dataset.i18nPlaceholder = 'mobileShortcuts.customLabelPlaceholder';
     customLabelInput.placeholder = t('mobileShortcuts.customLabelPlaceholder');
 
@@ -241,7 +241,7 @@ export class MobileShortcutsManager {
     customValueInput.id = 'mobile-shortcut-custom-value';
     customValueInput.type = 'text';
     customValueInput.maxLength = SHORTCUT_VALUE_MAX_LENGTH;
-    customValueInput.className = 'terminal-input flex-1 min-w-0 text-xs font-mono';
+    customValueInput.className = 'terminal-input flex-1 min-w-0 text-[11px] font-mono';
     customValueInput.dataset.i18nPlaceholder = 'mobileShortcuts.customValuePlaceholder';
     customValueInput.placeholder = t('mobileShortcuts.customValuePlaceholder');
 
@@ -452,13 +452,7 @@ export class MobileShortcutsManager {
 
   private togglePresetInDraft(preset: PresetShortcutDefinition): void {
     const idx = this.draftShortcuts.findIndex((item) => item.id === preset.id);
-    if (idx !== -1) {
-      if (this.draftShortcuts.length <= 1) {
-        notify(t('mobileShortcuts.minOneError'), { variant: 'warning' });
-        return;
-      }
-      this.draftShortcuts.splice(idx, 1);
-    } else {
+    if (idx === -1) {
       if (this.draftShortcuts.length >= MAX_MOBILE_SHORTCUTS) {
         notify(t('mobileShortcuts.maxCountError', { max: MAX_MOBILE_SHORTCUTS }), {
           variant: 'warning',
@@ -474,6 +468,12 @@ export class MobileShortcutsManager {
         itemToPush.value = preset.value;
       }
       this.draftShortcuts.push(itemToPush);
+    } else {
+      if (this.draftShortcuts.length <= 1) {
+        notify(t('mobileShortcuts.minOneError'), { variant: 'warning' });
+        return;
+      }
+      this.draftShortcuts.splice(idx, 1);
     }
     this.renderDraftState();
   }
