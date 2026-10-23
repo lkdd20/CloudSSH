@@ -41,6 +41,21 @@ test('Responses text completion does not finish the task; run_end does', async (
   expect(await page.evaluate(() => localStorage.getItem('cloudssh_agent_draft_1'))).toBeNull();
 });
 
+test('late memory updates do not erase an interrupted task draft', async ({ page }) => {
+  await mount(page);
+  await page.evaluate(() => {
+    const { panel, sent } = (window as any).__responsesAgent;
+    panel.sendMessage('Interrupted inspection');
+    const requestId = sent.at(-1).requestId;
+    panel.handleAgentFrame({ subType: 'run_start', requestId, runId: 1 });
+    panel.handleAgentFrame({ subType: 'run_end', requestId, runId: 1, outcome: 'failed' });
+  });
+  const before = await page.evaluate(() => localStorage.getItem('cloudssh_agent_draft_1'));
+  expect(before).not.toBeNull();
+  await page.evaluate(() => (window as any).__responsesAgent.panel.handleAgentFrame({ subType: 'memory_updated' }));
+  expect(await page.evaluate(() => localStorage.getItem('cloudssh_agent_draft_1'))).toBe(before);
+});
+
 test('replacement requests ignore stale output and stale completion', async ({ page }) => {
   await mount(page);
   await page.evaluate(() => {
@@ -73,7 +88,7 @@ for (const [locale, expected] of [['zh-CN', '模型响应未完成'], ['zh-TW', 
   });
 }
 
-test('safe request diagnostics are visible without exposing provider bodies or arbitrary fields', async ({ page }) => {
+test('chat shows short errors without technical diagnostics or provider text', async ({ page }) => {
   await mount(page, 'en-US');
   await page.evaluate(() => {
     const { panel, sent } = (window as any).__responsesAgent;
@@ -87,10 +102,11 @@ test('safe request diagnostics are visible without exposing provider bodies or a
     panel.handleAgentFrame({ subType: 'run_end', runId: 1, requestId, outcome: 'failed' });
   });
   const messages = page.locator('#agent-messages');
-  await expect(messages).toContainText('Context checkpoint');
-  await expect(messages).toContainText('text.format');
-  await expect(messages).toContainText('unsupported_parameter');
-  await expect(messages).toContainText('12345678-1234-4123-8123-123456789abc');
+  await expect(messages).toContainText('Context compaction stopped');
+  await expect(messages).toContainText('Responses API request failed (HTTP 400). Check your key, model, and provider capabilities.');
+  for (const detail of ['text.format', 'unsupported_parameter', '12345678-1234-4123-8123-123456789abc']) {
+    await expect(messages).not.toContainText(detail);
+  }
   await expect(messages).not.toContainText('SECRET');
   await expect(messages.locator('img, script')).toHaveCount(0);
 });
@@ -104,19 +120,22 @@ test('an auxiliary memory failure warns without removing the active task stream'
     panel.handleAgentFrame({ subType: 'stream_chunk', requestId, content: 'ACTIVE_STREAM' });
     panel.handleAgentFrame({ subType: 'memory_status', requestId, code: 'memory_failed',
       errorCode: 'responses_http', status: 500, diagnostics: { purpose: 'memory', stage: 'http',
-        providerCode: 'server_error' } });
+        providerCode: 'server_error', requestId: '12345678-1234-4123-8123-123456789abc' } });
   });
-  await expect(page.locator('.app-toast')).toContainText('Memory extraction failed');
+  await expect(page.locator('.app-toast')).toContainText('Knowledge extraction failed');
+  for (const detail of ['server_error', '12345678-1234-4123-8123-123456789abc']) {
+    await expect(page.locator('.app-toast')).not.toContainText(detail);
+  }
   await expect(page.locator('#agent-send-btn')).toHaveClass(/is-stopping/);
   await expect(page.locator('#agent-messages')).toContainText('ACTIVE_STREAM');
 });
 
-for (const [locale, recovery, fallback, paused] of [
-  ['zh-CN', '正在缩小输入', '本地执行事实', '安全暂停'],
-  ['zh-TW', '正在縮小輸入', '本機執行事實', '安全暫停'],
-  ['en-US', 'Regenerating once', 'local execution facts', 'safely paused'],
+for (const [locale, fallback, paused] of [
+  ['zh-CN', '近期对话', '安全暂停'],
+  ['zh-TW', '近期對話', '安全暫停'],
+  ['en-US', 'recent conversation', 'safely paused'],
 ]) {
-  test(`checkpoint recovery, fallback and pause diagnostics are localized (${locale})`, async ({ page }) => {
+  test(`context compaction local fallback and pause diagnostics are localized (${locale})`, async ({ page }) => {
     await mount(page, locale);
     await page.evaluate(() => {
       const { panel, sent } = (window as any).__responsesAgent;
@@ -128,11 +147,6 @@ for (const [locale, recovery, fallback, paused] of [
     await expect(page.locator('.app-toast')).toHaveCount(0);
     await page.evaluate(() => {
       const { panel, sent } = (window as any).__responsesAgent;
-      panel.handleAgentFrame({ subType: 'context_status', requestId: sent.at(-1).requestId, recovering: true });
-    });
-    await expect(page.locator('.app-toast').filter({ hasText: recovery })).toBeVisible();
-    await page.evaluate(() => {
-      const { panel, sent } = (window as any).__responsesAgent;
       panel.handleAgentFrame({ subType: 'context_status', requestId: sent.at(-1).requestId, compacted: true, checkpointSource: 'local' });
     });
     await expect(page.locator('.app-toast').filter({ hasText: fallback })).toBeVisible();
@@ -141,15 +155,14 @@ for (const [locale, recovery, fallback, paused] of [
     await page.evaluate(() => {
       const { panel, sent } = (window as any).__responsesAgent;
       const requestId = sent.at(-1).requestId;
-      panel.handleAgentFrame({ subType: 'error', requestId, runId: 1, code: 'responses_incomplete',
-        message: 'SECRET_PROVIDER_BODY', diagnostics: { purpose: 'checkpoint', stage: 'parse',
-          incompleteReason: 'max_output_tokens', requestedOutputTokens: 8192, outputTokens: 8000,
-          reasoningTokens: 7900, requestId: '12345678-1234-4123-8123-123456789abc', rawReason: 'SECRET' } });
+      panel.handleAgentFrame({ subType: 'error', requestId, runId: 1, code: 'responses_budget',
+        message: 'SECRET_PROVIDER_BODY', diagnostics: { purpose: 'checkpoint', stage: 'http',
+          requestId: '12345678-1234-4123-8123-123456789abc' } });
       panel.handleAgentFrame({ subType: 'run_end', requestId, runId: 1, outcome: 'failed' });
     });
     const messages = page.locator('#agent-messages');
     await expect(messages).toContainText(paused);
-    for (const value of ['8192', '8000', '7900', '12345678-1234-4123-8123-123456789abc']) await expect(messages).toContainText(value);
+    for (const value of ['12345678-1234-4123-8123-123456789abc']) await expect(messages).not.toContainText(value);
     await expect(messages).not.toContainText('SECRET');
     await expect(page.locator('#agent-send-btn')).not.toHaveClass(/is-stopping/);
   });
